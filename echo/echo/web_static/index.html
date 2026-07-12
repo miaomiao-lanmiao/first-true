@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Echo · AI 工作台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body data-theme="groknight">
+  <div class="blobs" aria-hidden="true">
+    <svg width="0" height="0"><defs>
+      <filter id="goo">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="26" result="blur" />
+        <feColorMatrix in="blur" mode="matrix"
+          values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -11" result="goo" />
+        <feBlend in="SourceGraphic" in2="goo" />
+      </filter>
+    </defs></svg>
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+    <span class="blob b4"></span>
+  </div>
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="toggleSidebar" title="切换侧栏">☰</button>
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <span class="brand-name">echo</span>
+          <span class="brand-sub">工作台</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="select-wrap">
+          <select id="modelSelect" aria-label="模型"></select>
+        </div>
+        <button class="icon-btn" id="themeBtn" title="主题">◐</button>
+        <button class="icon-btn" id="voiceToggle" title="语音播报">🔊</button>
+        <button class="icon-btn" id="settingsBtn" title="设置">⚙</button>
+      </div>
+    </header>
+
+    <div class="body">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-head">
+            <span>会话</span>
+            <button class="mini-btn" id="newChatBtn" title="新建会话">＋</button>
+          </div>
+          <div class="session-list" id="sessionList"></div>
+        </div>
+      </aside>
+
+      <main class="chat-col">
+        <div class="chat-scroll" id="chatScroll">
+          <div class="empty" id="emptyState">
+            <div class="empty-logo">echo</div>
+            <p class="empty-tag">你的 AI 编程工作台 · 支持技能与 MCP 工具</p>
+            <div class="chips" id="chips">
+              <button class="chip">用 Python 写一个快速排序</button>
+              <button class="chip">解释闭包是什么</button>
+              <button class="chip">审查这段代码的性能问题</button>
+            </div>
+          </div>
+          <div class="messages" id="messages"></div>
+        </div>
+
+        <div class="composer-wrap">
+          <div class="composer">
+            <button class="mic-btn" id="micBtn" title="语音指挥 (按住说话)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+            </button>
+            <textarea id="input" rows="1" placeholder="给 echo 发消息…  (Enter 发送 · Shift+Enter 换行 · 点🎤语音)" autocomplete="off"></textarea>
+            <button class="send-btn" id="sendBtn" title="发送">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+          <div class="composer-hint">
+            <span id="statusText">就绪</span>
+            <span class="hint-right">
+              <span id="skillCount">0 个技能</span>
+              <span class="dot-sep">·</span>
+              <span id="mcpCount">0 个 MCP</span>
+              <span class="dot-sep">·</span>
+              <span class="credit">懒喵大王制作</span>
+            </span>
+          </div>
+        </div>
+      </main>
+
+      <aside class="panel" id="rightPanel">
+        <div class="tabs">
+          <button class="tab active" data-tab="skills">技能</button>
+          <button class="tab" data-tab="mcp">MCP</button>
+          <button class="tab" data-tab="tasks">定时</button>
+        </div>
+        <div class="tab-body" id="tabSkills">
+          <div class="panel-head">
+            <span id="skillsTotal">技能库</span>
+            <button class="mini-btn" id="newSkillBtn">＋</button>
+          </div>
+          <div class="skill-list" id="skillList"></div>
+        </div>
+        <div class="tab-body hidden" id="tabMcp">
+          <div class="panel-head">
+            <span id="mcpTotal">MCP 服务器</span>
+            <button class="mini-btn" id="newMcpBtn">＋</button>
+          </div>
+          <div class="mcp-list" id="mcpList"></div>
+        </div>
+        <div class="tab-body hidden" id="tabTasks">
+          <div class="panel-head">
+            <span id="tasksTotal">定时任务</span>
+            <button class="mini-btn" id="newTaskBtn">＋</button>
+          </div>
+          <div class="task-list" id="taskList"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-backdrop" id="settingsModal" hidden>
+    <div class="modal">
+      <div class="modal-head"><h2>设置</h2><button class="icon-btn" id="closeSettings">✕</button></div>
+      <label class="field"><span>服务商</span><select id="setProvider"></select></label>
+      <label class="field"><span>模型</span><select id="setModel"></select></label>
+      <label class="field"><span>API Key</span><input id="setKey" type="password" placeholder="留空则不修改" autocomplete="off" /></label>
+      <div class="field-divider"><span>外观</span></div>
+      <label class="field"><span>AI 头像</span>
+        <div class="avatar-row">
+          <input id="setAvatar" placeholder="图片 URL，或上传本地图片" />
+          <button class="btn-ghost" id="avatarUploadBtn" type="button" style="padding:8px 14px">上传</button>
+          <input type="file" id="avatarFile" accept="image/*" hidden />
+        </div>
+        <div class="avatar-preview" id="avatarPreview"></div>
+      </label>
+      <div class="field-divider"><span>语音系统</span></div>
+      <label class="field field-row"><span>AI 语音播报</span><label class="switch"><input id="setTts" type="checkbox"><span class="slider"></span></label></label>
+      <label class="field"><span>语音合成引擎 (TTS)</span>
+        <select id="setTtsEngine">
+          <option value="browser">浏览器原生</option>
+          <option value="custom">自定义 API</option>
+        </select>
+      </label>
+      <div class="browser-tts">
+        <label class="field"><span>专属 AI 声音</span><select id="setVoice"></select></label>
+      </div>
+      <div class="custom-tts">
+        <label class="field"><span>API 地址</span><input id="setTtsEndpoint" placeholder="https://your-tts.com/synthesize" /></label>
+        <label class="field"><span>API Key (可选)</span><input id="setTtsKey" placeholder="Authorization 头" autocomplete="off" /></label>
+        <label class="field"><span>声音 / Voice 参数</span><input id="setTtsVoice" placeholder="如 zh-CN-XiaoxiaoNeural / speakers/1" /></label>
+      </div>
+      <label class="field"><span>语速</span><input id="setRate" type="range" min="0.5" max="2" step="0.1" value="1" /></label>
+      <label class="field"><span>语音识别引擎 (STT)</span>
+        <select id="setSttEngine">
+          <option value="browser">浏览器原生</option>
+          <option value="custom">自定义 API</option>
+        </select>
+      </label>
+      <div class="custom-stt">
+        <label class="field"><span>API 地址</span><input id="setSttEndpoint" placeholder="https://your-stt.com/transcribe" /></label>
+        <label class="field"><span>API Key (可选)</span><input id="setSttKey" placeholder="Authorization 头" autocomplete="off" /></label>
+      </div>
+      <label class="field"><span>语音指挥语言</span>
+        <select id="setSttLang">
+          <option value="zh-CN">中文（普通话）</option>
+          <option value="en-US">English (US)</option>
+          <option value="ja-JP">日本語</option>
+          <option value="ko-KR">한국어</option>
+        </select>
+      </label>
+      <p class="modal-note" id="modalNote"></p>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="cancelSettings">取消</button>
+        <button class="btn-primary" id="saveSettings">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skill Modal -->
+  <div class="modal-backdrop" id="skillModal" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-head"><h2 id="skillModalTitle">新建技能</h2><button class="icon-btn" id="closeSkill">✕</button></div>
+      <label class="field"><span>名称 (name)</span><input id="skillName" placeholder="my-skill" /></label>
+      <label class="field"><span>描述 (description)</span><input id="skillDesc" placeholder="何时使用此技能" /></label>
+      <label class="field field-grow"><span>内容 (SKILL.md 正文，支持 Markdown)</span>
+        <textarea id="skillContent" rows="12" placeholder=""></textarea>
+      </label>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="deleteSkill" hidden>删除</button>
+        <span class="spacer"></span>
+        <button class="btn-ghost" id="cancelSkill">取消</button>
+        <button class="btn-primary" id="saveSkill">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MCP Modal -->
+  <div class="modal-backdrop" id="mcpModal" hidden>
+    <div class="modal">
+      <div class="modal-head"><h2 id="mcpModalTitle">新建 MCP 服务器</h2><button class="icon-btn" id="closeMcp">✕</button></div>
+      <label class="field"><span>名称</span><input id="mcpName" placeholder="my-server" /></label>
+      <label class="field"><span>URL</span><input id="mcpUrl" placeholder="http://localhost:3000/mcp" /></label>
+      <label class="field"><span>认证 Token (可选)</span><input id="mcpToken" type="password" placeholder="Bearer token" /></label>
+      <label class="field field-row"><span>启用</span><label class="switch"><input id="mcpEnabled" type="checkbox" checked /><span class="slider"></span></label></label>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="deleteMcp" hidden>删除</button>
+        <span class="spacer"></span>
+        <button class="btn-ghost" id="cancelMcp">取消</button>
+        <button class="btn-primary" id="saveMcp">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Task Modal -->
+  <div class="modal-backdrop" id="taskModal" hidden>
+    <div class="modal">
+      <div class="modal-head"><h2 id="taskModalTitle">新建定时任务</h2><button class="icon-btn" id="closeTask">✕</button></div>
+      <label class="field"><span>任务名称</span><input id="taskName" placeholder="每日站会摘要" /></label>
+      <label class="field"><span>提示词 (发给 AI 的内容)</span>
+        <textarea id="taskPrompt" rows="5" placeholder="阅读今日 git 改动，生成一段站会摘要"></textarea>
+      </label>
+      <label class="field"><span>触发方式</span>
+        <select id="taskMode">
+          <option value="interval">每隔 N 分钟</option>
+          <option value="daily">每天固定时间</option>
+        </select>
+      </label>
+      <div class="task-interval">
+        <label class="field"><span>间隔 (分钟)</span><input id="taskInterval" type="number" min="1" value="60" /></label>
+      </div>
+      <div class="task-daily">
+        <label class="field"><span>每天时间 (HH:MM)</span><input id="taskTime" type="time" value="09:00" /></label>
+      </div>
+      <label class="field field-row"><span>启用</span><label class="switch"><input id="taskEnabled" type="checkbox" checked /><span class="slider"></span></label></label>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="deleteTask" hidden>删除</button>
+        <span class="spacer"></span>
+        <button class="btn-ghost" id="cancelTask">取消</button>
+        <button class="btn-primary" id="saveTask">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+  <script>if (window.marked) { marked.setOptions({ breaks: true, gfm: true }); }</script>
+  <script src="/app.js"></script>
+</body>
+</html>
