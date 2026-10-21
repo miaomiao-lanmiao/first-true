@@ -8,26 +8,41 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .ai.prompts import PROVIDER_REGISTRY, SYSTEM_PROMPTS
 from .ai.provider import create_provider
-from .config import get_provider_config, load_config, save_config
+from .config import CONFIG_DIR, get_provider_config, load_config, save_config
+from .storage import safe_child, write_private
 
 STATIC_DIR = Path(__file__).parent / "web_static"
-BASE_DIR = Path.home() / ".config" / "echo"
+BASE_DIR = CONFIG_DIR
 SESSION_DIR = BASE_DIR / "sessions"
 SKILLS_DIR = BASE_DIR / "skills"
 MCP_FILE = BASE_DIR / "mcp.json"
 TASKS_FILE = BASE_DIR / "tasks.json"
 AVATAR_FILE = BASE_DIR / "avatar.txt"
 
-for d in (SESSION_DIR, SKILLS_DIR):
-    d.mkdir(parents=True, exist_ok=True)
-
 app = FastAPI(title="Echo Web")
+
+
+@app.middleware("http")
+async def local_requests_only(request: Request, call_next):
+    host = request.url.hostname
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        return JSONResponse({"detail": "Loopback host required."}, status_code=400)
+    origin = request.headers.get("origin")
+    if origin and request.url.path.startswith("/api/"):
+        expected = f"{request.url.scheme}://{request.headers.get('host', '')}"
+        if origin != expected:
+            return JSONResponse({"detail": "Same-origin API requests required."}, status_code=403)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 # ===================== Models =====================
@@ -86,12 +101,22 @@ def _providers_payload() -> list[dict[str, Any]]:
 def _mask_key(key: str) -> str:
     if not key:
         return ""
-    return key if len(key) <= 8 else key[:4] + "*" * (len(key) - 8) + key[-4:]
+    return "[REDACTED]"
 
 
 # ---- sessions ----
 def _session_path(sid: str) -> Path:
-    return SESSION_DIR / f"{sid}.json"
+    try:
+        return safe_child(SESSION_DIR, sid, ".json")
+    except ValueError as error:
+        raise HTTPException(400, "Invalid session identifier.") from error
+
+
+def _skill_path(sid: str) -> Path:
+    try:
+        return safe_child(SKILLS_DIR, sid)
+    except ValueError as error:
+        raise HTTPException(400, "Invalid skill identifier.") from error
 
 
 def _load_session(sid: str) -> Optional[dict]:
@@ -102,12 +127,12 @@ def _load_session(sid: str) -> Optional[dict]:
 
 
 def _save_session(data: dict):
-    _session_path(data["id"]).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_private(_session_path(data["id"]), json.dumps(data, ensure_ascii=False, indent=2))
 
 
 # ---- skills (SKILL.md with YAML frontmatter) ----
 def _slug(name: str) -> str:
-    s = re.sub(r"[^\w一-龥-]+", "-", name.lower()).strip("-")
+    s = re.sub(r"[^\w一-龥-]+", "-", name.lower()).strip("-")[:80]
     return s or "skill"
 
 
@@ -134,13 +159,15 @@ def _parse_skill(md_path: Path) -> dict:
 def _write_skill(sid_dir: Path, name: str, description: str, content: str, enabled: bool):
     sid_dir.mkdir(parents=True, exist_ok=True)
     fm = f"---\nname: {name}\ndescription: {description}\nenabled: {str(enabled).lower()}\n---\n\n{content}\n"
-    (sid_dir / "SKILL.md").write_text(fm, encoding="utf-8")
+    write_private(sid_dir / "SKILL.md", fm)
 
 
 def _list_skills() -> list[dict]:
     out = []
+    if not SKILLS_DIR.exists():
+        return out
     for d in SKILLS_DIR.iterdir():
-        if d.is_dir() and (d / "SKILL.md").exists():
+        if not d.is_symlink() and d.is_dir() and (d / "SKILL.md").is_file():
             out.append(_parse_skill(d / "SKILL.md"))
     return out
 
@@ -163,7 +190,11 @@ def _load_mcp() -> list[dict]:
 
 
 def _save_mcp(data: list[dict]):
-    MCP_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_private(MCP_FILE, json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _public_mcp(entry: dict) -> dict:
+    return {**{key: value for key, value in entry.items() if key != "token"}, "token_set": bool(entry.get("token"))}
 
 
 # ===================== API =====================
@@ -192,12 +223,12 @@ def api_get_config():
         "tts_enabled": bool(ai.get("tts_enabled", False)),
         "tts_engine": ai.get("tts_engine", "browser"),
         "tts_endpoint": ai.get("tts_endpoint", ""),
-        "tts_api_key": ai.get("tts_api_key", ""),
+        "tts_api_key_set": bool(ai.get("tts_api_key")),
         "tts_voice": ai.get("tts_voice", ""),
         "tts_rate": ai.get("tts_rate", 1.0),
         "stt_engine": ai.get("stt_engine", "browser"),
         "stt_endpoint": ai.get("stt_endpoint", ""),
-        "stt_api_key": ai.get("stt_api_key", ""),
+        "stt_api_key_set": bool(ai.get("stt_api_key")),
         "stt_lang": ai.get("stt_lang", "zh-CN"),
         "avatar": ai.get("avatar", ""),
     })
@@ -223,7 +254,7 @@ def api_set_config(req: ConfigRequest):
     if req.tts_endpoint is not None:
         ai["tts_endpoint"] = req.tts_endpoint
     if req.tts_api_key is not None:
-        ai["tts_api_key"] = req.tts_api_key
+        ai["tts_api_key"] = "" if req.tts_api_key.lower() == "clear" else req.tts_api_key
     if req.tts_voice is not None:
         ai["tts_voice"] = req.tts_voice
     if req.tts_rate is not None:
@@ -233,14 +264,14 @@ def api_set_config(req: ConfigRequest):
     if req.stt_endpoint is not None:
         ai["stt_endpoint"] = req.stt_endpoint
     if req.stt_api_key is not None:
-        ai["stt_api_key"] = req.stt_api_key
+        ai["stt_api_key"] = "" if req.stt_api_key.lower() == "clear" else req.stt_api_key
     if req.stt_lang is not None:
         ai["stt_lang"] = req.stt_lang
     if req.avatar is not None:
         ai["avatar"] = req.avatar
-        AVATAR_FILE.write_text(req.avatar, encoding="utf-8")
+        write_private(AVATAR_FILE, req.avatar)
     save_config(cfg)
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "status": "saved"})
 
 
 @app.post("/api/chat")
@@ -263,8 +294,8 @@ async def api_chat(req: ChatRequest):
                 full += chunk
                 yield f"data: {json.dumps({'token': chunk}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+        except Exception:
+            yield f"data: {json.dumps({'error': 'Provider request failed. Check configuration and connectivity.'})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -275,6 +306,8 @@ async def api_chat(req: ChatRequest):
 def api_list_sessions():
     out = []
     for p in SESSION_DIR.glob("*.json"):
+        if p.is_symlink():
+            continue
         d = json.loads(p.read_text(encoding="utf-8"))
         out.append({"id": d["id"], "title": d.get("title", "会话"),
                     "updated_at": d.get("updated_at", ""), "count": len(d.get("messages", []))})
@@ -328,14 +361,17 @@ def api_list_skills():
 
 @app.post("/api/skills")
 def api_create_skill(req: SkillRequest):
+    if not req.name:
+        raise HTTPException(400, "Skill name is required.")
     sid = _slug(req.name) + "-" + uuid.uuid4().hex[:4]
-    _write_skill(SKILLS_DIR / sid, req.name, req.description, req.content, True)
-    return JSONResponse(_parse_skill(SKILLS_DIR / sid / "SKILL.md"))
+    directory = _skill_path(sid)
+    _write_skill(directory, req.name, req.description or "", req.content or "", True)
+    return JSONResponse(_parse_skill(directory / "SKILL.md"))
 
 
 @app.put("/api/skills/{sid}")
 def api_update_skill(sid: str, req: SkillRequest):
-    d = SKILLS_DIR / sid
+    d = _skill_path(sid)
     if not (d / "SKILL.md").exists():
         raise HTTPException(404, "skill not found")
     cur = _parse_skill(d / "SKILL.md")
@@ -347,7 +383,7 @@ def api_update_skill(sid: str, req: SkillRequest):
 
 @app.delete("/api/skills/{sid}")
 def api_delete_skill(sid: str):
-    d = SKILLS_DIR / sid
+    d = _skill_path(sid)
     if d.exists():
         import shutil
         shutil.rmtree(d)
@@ -357,7 +393,7 @@ def api_delete_skill(sid: str):
 # ---- mcp ----
 @app.get("/api/mcp")
 def api_list_mcp():
-    return JSONResponse(_load_mcp())
+    return JSONResponse([_public_mcp(entry) for entry in _load_mcp()])
 
 
 @app.post("/api/mcp")
@@ -367,7 +403,7 @@ def api_create_mcp(req: McpRequest):
              "token": req.token, "enabled": req.enabled}
     data.append(entry)
     _save_mcp(data)
-    return JSONResponse(entry)
+    return JSONResponse(_public_mcp(entry))
 
 
 @app.put("/api/mcp/{mid}")
@@ -377,10 +413,10 @@ def api_update_mcp(mid: str, req: McpRequest):
         if e["id"] == mid:
             if req.name is not None: e["name"] = req.name
             if req.url is not None: e["url"] = req.url
-            if req.token is not None: e["token"] = req.token
+            if req.token is not None: e["token"] = "" if req.token.lower() == "clear" else req.token
             if req.enabled is not None: e["enabled"] = req.enabled
             _save_mcp(data)
-            return JSONResponse(e)
+            return JSONResponse(_public_mcp(e))
     raise HTTPException(404, "mcp not found")
 
 
@@ -403,7 +439,7 @@ def _load_tasks() -> list[dict]:
 
 
 def _save_tasks(data: list[dict]):
-    TASKS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_private(TASKS_FILE, json.dumps(data, ensure_ascii=False, indent=2))
 
 
 def _task_due(t: dict, now: datetime) -> bool:
@@ -456,9 +492,9 @@ async def _run_task(t: dict, now: datetime | None = None):
         s["messages"].append({"role": "assistant", "content": result})
         s["updated_at"] = now.isoformat()
         _save_session(s)
-    except Exception as e:
+    except Exception:
         ok = False
-        result = f"运行失败：{e}"
+        result = "运行失败：请检查服务配置和网络连接。"
     t["last_run"] = now.isoformat()
     preview = result[:160].replace("\n", " ")
     history.insert(0, {"ts": now.isoformat(), "ok": ok, "preview": preview, "len": len(result)})
@@ -477,8 +513,8 @@ async def _scheduler_loop():
                         if x["id"] == t["id"]:
                             tasks[i] = t
                     _save_tasks(tasks)
-        except Exception as e:
-            print("[scheduler]", e)
+        except Exception:
+            print("[scheduler] Task failed; check configuration and connectivity.")
         await asyncio.sleep(20)
 
 

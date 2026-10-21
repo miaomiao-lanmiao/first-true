@@ -1,0 +1,16 @@
+name: Bug report / 缺陷反馈
+description: Report a small sanitized reproduction.
+body:
+  - type: input
+    id: versions
+    attributes:
+      label: OS, Python and Echo version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Command, expected/actual result and reproduction
+      description: Do not include private sessions, configuration values or keys.
+    validations:
+      required: true

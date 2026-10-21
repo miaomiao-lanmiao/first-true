@@ -1,0 +1,9 @@
+name: Feature request / 功能建议
+description: Describe the workflow and current workaround.
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: User task and desired behavior
+    validations:
+      required: true
