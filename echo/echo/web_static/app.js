@@ -44,7 +44,7 @@ async function loadConfig() {
   ms.innerHTML = "";
   (cfg.models || []).forEach((m) => {
     const o = document.createElement("option");
-    o.value = m.id; o.textContent = m.name; ms.appendChild(o);
+    o.value = typeof m === "string" ? m : m.id; o.textContent = typeof m === "string" ? m : m.name; ms.appendChild(o);
   });
   if (cfg.model && [...ms.options].some((o) => o.value === cfg.model)) ms.value = cfg.model;
   PROVIDERS = cfg.providers || [];
@@ -55,10 +55,8 @@ async function loadConfig() {
   voiceState.lang = cfg.stt_lang || "zh-CN";
   voiceState.ttsEngine = cfg.tts_engine || "browser";
   voiceState.ttsEndpoint = cfg.tts_endpoint || "";
-  voiceState.ttsKey = cfg.tts_api_key || "";
   voiceState.sttEngine = cfg.stt_engine || "browser";
   voiceState.sttEndpoint = cfg.stt_endpoint || "";
-  voiceState.sttKey = cfg.stt_api_key || "";
   appState.avatar = cfg.avatar || "";
   applyAvatar();
   document.body.dataset.tts = voiceState.ttsEngine;
@@ -84,7 +82,7 @@ async function loadProvidersForSettings(providers) {
   msel.innerHTML = "";
   const allModels = (providers.flatMap((p) => p.models || []) || []);
   allModels.forEach((m) => {
-    const o = document.createElement("option"); o.value = m.id; o.textContent = m.name; msel.appendChild(o);
+    const o = document.createElement("option"); o.value = typeof m === "string" ? m : m.id; o.textContent = typeof m === "string" ? m : m.name; msel.appendChild(o);
   });
 }
 
@@ -307,7 +305,7 @@ function currentHistory() {
 }
 
 async function persistMessages(messages) {
-  await fetchJSON(`/api/sessions/${state.activeSession}`, {
+  await fetchJSON(`/api/sessions/${state.activeSession}/messages`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages }),
@@ -388,7 +386,8 @@ async function openMcpModal(m) {
   $("#mcpModalTitle").textContent = m ? "编辑 MCP 服务器" : "新建 MCP 服务器";
   $("#mcpName").value = m ? m.name : "";
   $("#mcpUrl").value = m ? m.url : "";
-  $("#mcpToken").value = m ? m.token : "";
+  $("#mcpToken").value = "";
+  $("#mcpToken").placeholder = m && m.token_set ? "已保存；留空保留，输入 clear 清除" : "可选令牌";
   $("#mcpEnabled").checked = m ? !!m.enabled : true;
   $("#deleteMcp").hidden = !m;
   $("#mcpModal").hidden = false;
@@ -397,7 +396,8 @@ async function saveMcp() {
   const name = $("#mcpName").value.trim();
   const url = $("#mcpUrl").value.trim();
   if (!name || !url) return alert("请填写名称和 URL");
-  const body = { name, url, token: $("#mcpToken").value, enabled: $("#mcpEnabled").checked };
+  const body = { name, url, enabled: $("#mcpEnabled").checked };
+  if ($("#mcpToken").value) body.token = $("#mcpToken").value;
   if (state.editingMcp) {
     await fetchJSON(`/api/mcp/${state.editingMcp}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   } else {
@@ -513,12 +513,14 @@ async function openSettings() {
   $("#setTts").checked = !!cfg.tts_enabled;
   $("#setTtsEngine").value = cfg.tts_engine || "browser";
   $("#setTtsEndpoint").value = cfg.tts_endpoint || "";
-  $("#setTtsKey").value = cfg.tts_api_key || "";
+  $("#setTtsKey").value = "";
+  $("#setTtsKey").placeholder = cfg.tts_api_key_set ? "已保存；本页直连语音需重新输入" : "语音服务密钥";
   $("#setTtsVoice").value = cfg.tts_voice || "";
   $("#setRate").value = cfg.tts_rate || 1;
   $("#setSttEngine").value = cfg.stt_engine || "browser";
   $("#setSttEndpoint").value = cfg.stt_endpoint || "";
-  $("#setSttKey").value = cfg.stt_api_key || "";
+  $("#setSttKey").value = "";
+  $("#setSttKey").placeholder = cfg.stt_api_key_set ? "已保存；本页直连语音需重新输入" : "识别服务密钥";
   $("#setSttLang").value = cfg.stt_lang || "zh-CN";
   document.body.dataset.tts = cfg.tts_engine || "browser";
   document.body.dataset.stt = cfg.stt_engine || "browser";
@@ -533,7 +535,13 @@ async function openSettings() {
 }
 function renderAvatarPreview() {
   const p = $("#avatarPreview");
-  p.innerHTML = appState.avatar ? `<img src="${appState.avatar}" alt="avatar" />` : "";
+  p.replaceChildren();
+  if (appState.avatar) {
+    const image = document.createElement("img");
+    image.src = appState.avatar;
+    image.alt = "avatar";
+    p.appendChild(image);
+  }
 }
 function fillModelsForProvider(providerId, selectedModel) {
   const sel = $("#setModel");
@@ -554,11 +562,13 @@ async function saveSettings() {
   body.stt_lang = $("#setSttLang").value;
   body.tts_engine = $("#setTtsEngine").value;
   body.tts_endpoint = $("#setTtsEndpoint").value.trim();
-  body.tts_api_key = $("#setTtsKey").value.trim();
+  const ttsKey = $("#setTtsKey").value.trim();
+  if (ttsKey) { body.tts_api_key = ttsKey; voiceState.ttsKey = ttsKey.toLowerCase() === "clear" ? "" : ttsKey; }
   body.tts_voice = $("#setTtsVoice").value.trim();
   body.stt_engine = $("#setSttEngine").value;
   body.stt_endpoint = $("#setSttEndpoint").value.trim();
-  body.stt_api_key = $("#setSttKey").value.trim();
+  const sttKey = $("#setSttKey").value.trim();
+  if (sttKey) { body.stt_api_key = sttKey; voiceState.sttKey = sttKey.toLowerCase() === "clear" ? "" : sttKey; }
   body.avatar = $("#setAvatar").value.trim();
   const r = await fetchJSON("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (r && r.status === "saved") $("#modalNote").textContent = "已保存 ✓";
@@ -578,7 +588,9 @@ function autoResize() {
   const t = $("#input"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 180) + "px";
 }
 function renderMarkdown(md) {
-  if (window.marked) { try { return window.marked.parse(md || ""); } catch {} }
+  if (window.marked && window.DOMPurify) {
+    try { return window.DOMPurify.sanitize(window.marked.parse(md || ""), { USE_PROFILES: { html: true } }); } catch {}
+  }
   return esc(md).replace(/\n/g, "<br>");
 }
 function attachCopyButtons(scope) {

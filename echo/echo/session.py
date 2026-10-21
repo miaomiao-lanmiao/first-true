@@ -4,8 +4,10 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from .config import CONFIG_DIR
+from .storage import safe_child, write_private
 
-SESSION_DIR = Path.home() / ".config" / "echo" / "sessions"
+SESSION_DIR = CONFIG_DIR / "sessions"
 
 
 class Session:
@@ -38,15 +40,14 @@ class Session:
 
 def save_session(session: Session) -> None:
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
-    safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in session.title)
-    path = SESSION_DIR / f"{safe}.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
+    safe = "".join(c if c.isalnum() or c in "_-" else "_" for c in session.title)[:100] or "default"
+    path = safe_child(SESSION_DIR, safe, ".json")
+    write_private(path, json.dumps(session.to_dict(), indent=2, ensure_ascii=False))
 
 
 def load_session(title: str) -> Optional[Session]:
-    safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in title)
-    path = SESSION_DIR / f"{safe}.json"
+    safe = "".join(c if c.isalnum() or c in "_-" else "_" for c in title)[:100] or "default"
+    path = safe_child(SESSION_DIR, safe, ".json")
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:

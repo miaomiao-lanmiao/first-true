@@ -6,7 +6,7 @@ import typer
 from rich import print as rprint
 
 from .ai.prompts import PROVIDER_REGISTRY
-from .config import load_config, save_config
+from .config import load_config, redacted_config, save_config
 from .session import list_sessions
 
 app = typer.Typer(
@@ -105,7 +105,7 @@ def config(
     if show:
         import yaml
         rprint("[bold]Echo Configuration:[/bold]")
-        rprint(yaml.safe_dump(current, default_flow_style=False, allow_unicode=True))
+        rprint(yaml.safe_dump(redacted_config(current), default_flow_style=False, allow_unicode=True))
         return
 
     if key and value:
@@ -124,7 +124,7 @@ def config(
     if not key and not value:
         import yaml
         rprint("[bold]Echo Configuration:[/bold]")
-        rprint(yaml.safe_dump(load_config(), default_flow_style=False, allow_unicode=True))
+        rprint(yaml.safe_dump(redacted_config(load_config()), default_flow_style=False, allow_unicode=True))
         return
 
     rprint("[yellow]Usage: echo config <key> <value> or echo config --show[/yellow]")
@@ -150,6 +150,9 @@ def web(
 ):
     """Launch the Echo Web UI."""
     import uvicorn
+
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        raise typer.BadParameter("Echo Web supports loopback hosts only; remote authentication is not implemented.")
 
     rprint(f"[bold #d97757]echo web[/bold #d97757] → http://{host}:{port}")
     uvicorn.run("echo.web:app", host=host, port=port, reload=False, log_level="warning")

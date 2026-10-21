@@ -2,6 +2,9 @@
 
 > A terminal AI coding assistant with a beautiful TUI — chat, code, and explore with any AI model.
 
+维护与安装入口见仓库根目录 [README](../README.md)。以下模型名称是原型示例，
+请以服务商账号的实际可用项为准。使用 `echo-chat` 避免系统 `echo` 命令冲突。
+
 ![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![CLI](https://img.shields.io/badge/CLI-Textual%20TUI-orange)
@@ -13,8 +16,8 @@ Echo brings AI-powered coding assistance directly into your terminal. With a gor
 ## Quick Start
 
 ```bash
-# Install
-pip install echo-chat
+# Install from this source directory (no PyPI release is assumed)
+python -m pip install .
 
 # Set your API key
 echo config ai.api_key sk-xxx
@@ -83,8 +86,8 @@ echo config --show
 ## Development
 
 ```bash
-git clone https://github.com/yourusername/echo
-cd echo
+git clone https://github.com/miaomiao-lanmiao/first-true.git
+cd first-true/echo
 pip install -e .
 echo
 ```
