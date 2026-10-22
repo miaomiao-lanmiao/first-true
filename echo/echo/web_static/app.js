@@ -327,9 +327,17 @@ async function newSession() {
 }
 async function openSession(id) {
   if (state.stream) return;
+  const s = await fetchJSON(`/api/sessions/${encodeURIComponent(id)}`);
+  if (!s || !Array.isArray(s.messages)) {
+    setStatus("无法读取会话，请检查本地会话文件。");
+    return;
+  }
+  if (state.stream) return;
+  const index = state.sessions.findIndex((session) => session.id === id);
+  if (index >= 0) state.sessions[index] = { ...state.sessions[index], ...s };
+  else state.sessions.push(s);
   state.activeSession = id;
   assistantEl = null;
-  const s = state.sessions.find((x) => x.id === id) || await fetchJSON(`/api/sessions/${id}`);
   $("#messages").innerHTML = "";
   $("#emptyState").style.display = s.messages && s.messages.length ? "none" : "flex";
   (s.messages || []).forEach((m) => {

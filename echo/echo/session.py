@@ -38,21 +38,45 @@ class Session:
         return session
 
 
+def _title_path(title: str) -> Path:
+    legacy = "".join(c if c.isalnum() or c in " _-" else "_" for c in title)[:100]
+    if not legacy.strip():
+        legacy = "default"
+    path = safe_child(SESSION_DIR, legacy, ".json", allow_spaces=True)
+    previous = safe_child(SESSION_DIR, legacy.replace(" ", "_"), ".json")
+    return previous if not path.exists() and previous.exists() else path
+
+
+def read_session(path: Path) -> dict:
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise ValueError()
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("messages"), list):
+            raise ValueError()
+        for message in data["messages"]:
+            if not isinstance(message, dict) or not all(isinstance(message.get(key), str) for key in ("role", "content")):
+                raise ValueError()
+        if "title" in data and not isinstance(data["title"], str):
+            raise ValueError()
+        for key in ("created_at", "updated_at"):
+            if key in data and not isinstance(data[key], str):
+                raise ValueError()
+        return data
+    except (OSError, ValueError, UnicodeError):
+        raise ValueError("Stored session data is invalid.") from None
+
+
 def save_session(session: Session) -> None:
-    SESSION_DIR.mkdir(parents=True, exist_ok=True)
-    safe = "".join(c if c.isalnum() or c in "_-" else "_" for c in session.title)[:100] or "default"
-    path = safe_child(SESSION_DIR, safe, ".json")
+    path = _title_path(session.title)
     write_private(path, json.dumps(session.to_dict(), indent=2, ensure_ascii=False))
 
 
 def load_session(title: str) -> Optional[Session]:
-    safe = "".join(c if c.isalnum() or c in "_-" else "_" for c in title)[:100] or "default"
-    path = safe_child(SESSION_DIR, safe, ".json")
+    path = _title_path(title)
     if not path.exists():
         return None
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    return Session.from_dict(data)
+    return Session.from_dict(read_session(path))
 
 
 def list_sessions() -> list[str]:

@@ -42,6 +42,56 @@ class StorageTests(unittest.TestCase):
         first["ai"]["model"] = "mutated-model"
         self.assertNotEqual(config.load_config()["ai"]["model"], "mutated-model")
 
+    def test_legacy_session_titles_with_spaces_remain_loadable(self):
+        import json
+        legacy = session.Session("legacy notes")
+        legacy.add_message("user", "synthetic legacy message")
+        (web.SESSION_DIR / "legacy notes.json").write_text(json.dumps(legacy.to_dict()), encoding="utf-8")
+        loaded = session.load_session("legacy notes")
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.messages[0]["content"], "synthetic legacy message")
+
+    def test_underscore_session_files_from_previous_maintenance_remain_loadable(self):
+        import json
+        previous = session.Session("release notes")
+        previous.add_message("user", "synthetic prior session")
+        path = web.SESSION_DIR / "release_notes.json"
+        path.write_text(json.dumps(previous.to_dict()), encoding="utf-8")
+        loaded = session.load_session("release notes")
+        self.assertIsNotNone(loaded)
+        session.save_session(loaded)
+        self.assertTrue(path.exists())
+        self.assertFalse((web.SESSION_DIR / "release notes.json").exists())
+
+    def test_web_sessions_include_cli_saved_conversations(self):
+        conversation = session.Session("release notes")
+        conversation.add_message("user", "synthetic shared session")
+        session.save_session(conversation)
+        response = self.client.get("/api/sessions")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["id"], "release notes")
+        loaded = self.client.get("/api/sessions/release%20notes")
+        self.assertEqual(loaded.status_code, 200)
+        self.assertEqual(loaded.json()["messages"][0]["content"], "synthetic shared session")
+
+    def test_one_invalid_session_does_not_break_the_session_list(self):
+        valid = self.client.post("/api/sessions", json={"title": "valid"}).json()["id"]
+        (web.SESSION_DIR / "damaged.json").write_text('{bad: synthetic-invalid-content', encoding="utf-8")
+        (web.SESSION_DIR / "invalid-shape.json").write_text('[]', encoding="utf-8")
+        (web.SESSION_DIR / "invalid-messages.json").write_text('{"messages":"invalid"}', encoding="utf-8")
+        listed = self.client.get("/api/sessions")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual([item["id"] for item in listed.json()], [valid])
+        damaged = self.client.get("/api/sessions/damaged")
+        self.assertEqual(damaged.status_code, 422)
+        self.assertNotIn("synthetic-invalid-content", damaged.text)
+
+    def test_config_display_redacts_nested_list_values_without_mutating_them(self):
+        original = {"services": [{"api_key": "synthetic-list-key", "nested": [{"password": "synthetic-list-password"}]}]}
+        redacted = config.redacted_config(original)
+        self.assertNotIn("synthetic-list-", str(redacted))
+        self.assertEqual(original["services"][0]["api_key"], "synthetic-list-key")
+
     def test_environment_key_does_not_stick_after_environment_removed(self):
         with patch.dict(os.environ, {"ECHO_API_KEY": "synthetic-sensitive-value"}):
             self.assertEqual(config.load_config()["ai"]["api_key"], "synthetic-sensitive-value")

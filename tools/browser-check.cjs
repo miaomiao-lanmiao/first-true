@@ -52,11 +52,21 @@ async function main() {
       return response.json();
     });
     assert.equal(stored.messages[0].content, 'synthetic local test');
+    await page.reload();
+    await page.locator('.session-title').first().click();
+    await page.waitForFunction(() => document.querySelector('#messages').textContent.includes('synthetic local test'), undefined, { timeout: 3000 });
+    assert.equal(await page.evaluate(() => currentHistory().length), 1);
+    fs.writeFileSync(path.join(storage, 'sessions', 'legacy notes.json'), JSON.stringify({
+      title: 'Legacy notes fixture', messages: [{ role: 'user', content: 'synthetic legacy browser message' }],
+    }));
+    await page.reload();
+    await page.locator('.session-title').filter({ hasText: 'Legacy notes fixture' }).click();
+    await page.waitForFunction(() => document.querySelector('#messages').textContent.includes('synthetic legacy browser message'), undefined, { timeout: 3000 });
     assert.deepEqual(errors, []);
     assert.deepEqual(external, []);
     fs.mkdirSync(path.join(root, 'reports'), { recursive: true });
     await page.screenshot({ path: path.join(root, 'reports', 'echo-browser-check.png') });
-    console.log('Browser checks passed: local assets, model selection, safe Markdown, session persistence, no page errors or external asset requests.');
+    console.log('Browser checks passed: local assets, safe Markdown, session persistence after reload, legacy sessions, no page errors or external asset requests.');
   } finally {
     if (browser) await browser.close();
     server.kill();

@@ -4,6 +4,7 @@ from typing import Optional
 
 import typer
 from rich import print as rprint
+from ._version import __version__
 
 from .ai.prompts import PROVIDER_REGISTRY
 from .config import load_config, redacted_config, save_config
@@ -19,7 +20,7 @@ app = typer.Typer(
 
 def _version_callback(value: bool):
     if value:
-        rprint("[bold #cba6f7]Echo[/bold #cba6f7] v0.1.0")
+        rprint(f"[bold #cba6f7]Echo[/bold #cba6f7] v{__version__}")
         raise typer.Exit()
 
 

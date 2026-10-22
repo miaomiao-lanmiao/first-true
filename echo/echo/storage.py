@@ -6,8 +6,9 @@ import re
 import tempfile
 
 
-def safe_child(root: Path, identifier: str, suffix: str = "") -> Path:
-    if not isinstance(identifier, str) or not re.fullmatch(r"[\w-]{1,100}", identifier):
+def safe_child(root: Path, identifier: str, suffix: str = "", *, allow_spaces: bool = False) -> Path:
+    pattern = r"[\w -]{1,100}" if allow_spaces else r"[\w-]{1,100}"
+    if not isinstance(identifier, str) or not identifier.strip() or not re.fullmatch(pattern, identifier):
         raise ValueError("Invalid storage identifier.")
     candidate = root / f"{identifier}{suffix}"
     if candidate.is_symlink() or candidate.resolve().parent != root.resolve():

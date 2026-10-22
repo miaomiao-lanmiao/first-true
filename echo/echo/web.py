@@ -16,6 +16,7 @@ from .ai.prompts import PROVIDER_REGISTRY, SYSTEM_PROMPTS
 from .ai.provider import create_provider
 from .config import CONFIG_DIR, get_provider_config, load_config, save_config
 from .storage import safe_child, write_private
+from .session import read_session
 
 STATIC_DIR = Path(__file__).parent / "web_static"
 BASE_DIR = CONFIG_DIR
@@ -107,7 +108,7 @@ def _mask_key(key: str) -> str:
 # ---- sessions ----
 def _session_path(sid: str) -> Path:
     try:
-        return safe_child(SESSION_DIR, sid, ".json")
+        return safe_child(SESSION_DIR, sid, ".json", allow_spaces=True)
     except ValueError as error:
         raise HTTPException(400, "Invalid session identifier.") from error
 
@@ -123,7 +124,12 @@ def _load_session(sid: str) -> Optional[dict]:
     p = _session_path(sid)
     if not p.exists():
         return None
-    return json.loads(p.read_text(encoding="utf-8"))
+    try:
+        data = read_session(p)
+    except ValueError:
+        raise HTTPException(422, "Stored session data is invalid.") from None
+    # Legacy CLI sessions had title-based filenames and no stored id field.
+    return {**data, "id": sid, "title": data.get("title", sid)}
 
 
 def _save_session(data: dict):
@@ -306,11 +312,14 @@ async def api_chat(req: ChatRequest):
 def api_list_sessions():
     out = []
     for p in SESSION_DIR.glob("*.json"):
-        if p.is_symlink():
+        try:
+            d = _load_session(p.stem)
+        except HTTPException:
             continue
-        d = json.loads(p.read_text(encoding="utf-8"))
+        if d is None:
+            continue
         out.append({"id": d["id"], "title": d.get("title", "会话"),
-                    "updated_at": d.get("updated_at", ""), "count": len(d.get("messages", []))})
+                    "updated_at": d.get("updated_at", d.get("created_at", "")), "count": len(d["messages"])})
     out.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
     return JSONResponse(out)
 
