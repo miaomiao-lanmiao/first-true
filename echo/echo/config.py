@@ -68,15 +68,20 @@ def save_config(config: dict) -> None:
 
 
 def redacted_config(config: dict) -> dict:
-    result = {}
-    for key, value in config.items():
-        if any(word in key.lower() for word in ("key", "token", "secret", "password")):
-            result[key] = "[REDACTED]" if value else ""
-        elif isinstance(value, dict):
-            result[key] = redacted_config(value)
-        else:
-            result[key] = deepcopy(value)
-    return result
+    def visit(value):
+        if isinstance(value, list):
+            return [visit(child) for child in value]
+        if isinstance(value, dict):
+            result = {}
+            for key, child in value.items():
+                if isinstance(key, str) and any(word in key.lower() for word in ("key", "token", "secret", "password")):
+                    result[key] = "[REDACTED]" if child else ""
+                else:
+                    result[key] = visit(child)
+            return result
+        return deepcopy(value)
+
+    return visit(config)
 
 
 def _deep_merge(base: dict, override: dict) -> None:

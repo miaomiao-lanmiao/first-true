@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "echo-chat"
-version = "0.1.0"
+version = "0.1.1"
 description = "A terminal AI coding assistant with a beautiful TUI — chat, code, and explore with any AI model."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["ai", "cli", "tui", "coding-assistant", "chat", "terminal"]
 authors = [
     {name = "懒喵大王喵"}
@@ -18,7 +19,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

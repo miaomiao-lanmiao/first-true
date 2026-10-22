@@ -40,6 +40,11 @@ locally. Saved API keys are **plaintext**, not encrypted; environment-managed
 credentials are preferable. Atomic config/session writes restrict new files on
 POSIX systems; Windows relies on the user's directory ACL.
 
+Legacy title-based CLI/TUI sessions, including filenames containing spaces, are
+also available in the Web interface. Listing does not migrate or rewrite files.
+Malformed session records are skipped in the list; directly opening one returns
+a sanitized error. Those files remain on disk for manual recovery.
+
 Configuration displays omit stored keys. Settings fields remain blank to retain
 existing credentials; enter `clear` to remove a key. Browser-direct speech
 services require a key re-entered for the current page, since saved credentials
