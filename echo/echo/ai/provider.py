@@ -1,11 +1,40 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
 import httpx
 
 from .prompts import ProviderConfig
+
+
+class ProviderError(RuntimeError):
+    """A user-facing provider failure that contains no upstream request data."""
+
+
+@asynccontextmanager
+async def _provider_client():
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            yield client
+    except httpx.HTTPError:
+        raise ProviderError("Provider connection failed. Check connectivity and provider configuration.") from None
+
+
+def _check_status(response: httpx.Response) -> None:
+    if not response.is_success:
+        raise ProviderError(
+            f"Provider request failed (HTTP {response.status_code}). Check provider configuration and availability."
+        )
+
+
+def _checked_payload(data: dict) -> dict:
+    if not isinstance(data, dict):
+        raise ProviderError("Provider returned an invalid response.")
+    if data.get("error"):
+        raise ProviderError("Provider reported an error. Check provider configuration and availability.")
+    return data
 
 
 class OpenAIProvider:
@@ -24,18 +53,19 @@ class OpenAIProvider:
             "max_tokens": self.config.max_tokens,
             "stream": True,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             async with client.stream(
                 "POST", f"{self.config.base_url}/chat/completions",
                 headers=headers, json=payload,
             ) as resp:
+                _check_status(resp)
                 async for line in resp.aiter_lines():
                     if line.startswith("data: "):
                         data = line[6:]
                         if data.strip() == "[DONE]":
                             break
                         try:
-                            chunk = json.loads(data)
+                            chunk = _checked_payload(json.loads(data))
                             delta = chunk.get("choices", [{}])[0].get("delta", {})
                             content = delta.get("content", "")
                             if content:
@@ -54,14 +84,13 @@ class OpenAIProvider:
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             resp = await client.post(
                 f"{self.config.base_url}/chat/completions",
                 headers=headers, json=payload,
             )
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
+            _check_status(resp)
+            data = _checked_payload(resp.json())
             return data.get("choices", [{}])[0].get("message", {}).get("content")
 
 
@@ -81,18 +110,19 @@ class DeepSeekProvider:
             "max_tokens": self.config.max_tokens,
             "stream": True,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             async with client.stream(
                 "POST", f"{self.config.base_url}/chat/completions",
                 headers=headers, json=payload,
             ) as resp:
+                _check_status(resp)
                 async for line in resp.aiter_lines():
                     if line.startswith("data: "):
                         data = line[6:]
                         if data.strip() == "[DONE]":
                             break
                         try:
-                            chunk = json.loads(data)
+                            chunk = _checked_payload(json.loads(data))
                             delta = chunk.get("choices", [{}])[0].get("delta", {})
                             content = delta.get("content", "")
                             if content:
@@ -111,14 +141,13 @@ class DeepSeekProvider:
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             resp = await client.post(
                 f"{self.config.base_url}/chat/completions",
                 headers=headers, json=payload,
             )
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
+            _check_status(resp)
+            data = _checked_payload(resp.json())
             return data.get("choices", [{}])[0].get("message", {}).get("content")
 
 
@@ -150,18 +179,19 @@ class AnthropicProvider:
         if system_msg:
             payload["system"] = system_msg
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             async with client.stream(
                 "POST", f"{self.config.base_url}/messages",
                 headers=headers, json=payload,
             ) as resp:
+                _check_status(resp)
                 async for line in resp.aiter_lines():
                     if line.startswith("data: "):
                         data = line[6:]
                         if data.strip() == "[DONE]":
                             break
                         try:
-                            chunk = json.loads(data)
+                            chunk = _checked_payload(json.loads(data))
                             if chunk.get("type") == "content_block_delta":
                                 delta = chunk.get("delta", {})
                                 text = delta.get("text", "")
@@ -193,14 +223,13 @@ class AnthropicProvider:
         if system_msg:
             payload["system"] = system_msg
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             resp = await client.post(
                 f"{self.config.base_url}/messages",
                 headers=headers, json=payload,
             )
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
+            _check_status(resp)
+            data = _checked_payload(resp.json())
             blocks = data.get("content", [])
             return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
 
@@ -220,13 +249,14 @@ class GeminiProvider:
         url = f"{self.config.base_url}/models/{self.config.model}:streamGenerateContent?alt=sse&key={self.config.api_key}"
         payload = {"contents": gemini_messages}
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             async with client.stream("POST", url, json=payload) as resp:
+                _check_status(resp)
                 async for line in resp.aiter_lines():
                     if line.startswith("data: "):
                         data = line[6:]
                         try:
-                            chunk = json.loads(data)
+                            chunk = _checked_payload(json.loads(data))
                             candidates = chunk.get("candidates", [])
                             if candidates:
                                 parts = candidates[0].get("content", {}).get("parts", [])
@@ -246,11 +276,10 @@ class GeminiProvider:
             gemini_messages.append({"role": role, "parts": [{"text": m["content"]}]})
 
         url = f"{self.config.base_url}/models/{self.config.model}:generateContent?key={self.config.api_key}"
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             resp = await client.post(url, json={"contents": gemini_messages})
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
+            _check_status(resp)
+            data = _checked_payload(resp.json())
             candidates = data.get("candidates", [])
             if candidates:
                 parts = candidates[0].get("content", {}).get("parts", [])
@@ -264,13 +293,14 @@ class OllamaProvider:
 
     async def chat_stream(self, messages: list[dict]) -> AsyncGenerator[str, None]:
         payload = {"model": self.config.model, "messages": messages, "stream": True}
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             async with client.stream("POST", f"{self.config.base_url}/api/chat", json=payload) as resp:
+                _check_status(resp)
                 async for line in resp.aiter_lines():
                     if not line.strip():
                         continue
                     try:
-                        chunk = json.loads(line)
+                        chunk = _checked_payload(json.loads(line))
                         content = chunk.get("message", {}).get("content", "")
                         if content:
                             yield content
@@ -281,11 +311,10 @@ class OllamaProvider:
 
     async def chat(self, messages: list[dict]) -> Optional[str]:
         payload = {"model": self.config.model, "messages": messages, "stream": False}
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _provider_client() as client:
             resp = await client.post(f"{self.config.base_url}/api/chat", json=payload)
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
+            _check_status(resp)
+            data = _checked_payload(resp.json())
             return data.get("message", {}).get("content", "")
 
 
