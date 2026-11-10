@@ -59,7 +59,7 @@ def _run_one_shot(query: str, provider_name: Optional[str] = None, model_name: O
     if model_name:
         config["ai"]["model"] = model_name
 
-    from .ai.provider import create_provider
+    from .ai.provider import ProviderError, create_provider
     from .ai.prompts import SYSTEM_PROMPTS
     from .config import get_provider_config
 
@@ -75,8 +75,12 @@ def _run_one_shot(query: str, provider_name: Optional[str] = None, model_name: O
         from rich.console import Console
         console = Console()
         console.print(f"\n[bold #a6e3a1]Echo[/bold #a6e3a1]\n")
-        async for chunk in provider.chat_stream(messages):
-            console.print(chunk, end="")
+        try:
+            async for chunk in provider.chat_stream(messages):
+                console.print(chunk, end="")
+        except ProviderError as error:
+            console.print(f"\n[red]{error}[/red]")
+            raise typer.Exit(code=1) from None
         console.print()
 
     asyncio.run(run())

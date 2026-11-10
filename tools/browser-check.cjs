@@ -62,11 +62,52 @@ async function main() {
     await page.reload();
     await page.locator('.session-title').filter({ hasText: 'Legacy notes fixture' }).click();
     await page.waitForFunction(() => document.querySelector('#messages').textContent.includes('synthetic legacy browser message'), undefined, { timeout: 3000 });
+    const requests = [];
+    let reply = 'data: {"token":"synthetic streamed reply"}\n\ndata: {"done":true}\n\n';
+    await page.route(`${url}/api/chat`, async route => {
+      requests.push(route.request().postDataJSON());
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: reply });
+    });
+    let allowSave;
+    const saveReleased = new Promise(resolve => { allowSave = resolve; });
+    await page.route(`${url}/api/sessions/*/messages`, async route => {
+      await saveReleased;
+      await route.continue();
+    }, { times: 1 });
+    const firstSave = page.waitForRequest(request => request.method() === 'PUT' && request.url().endsWith('/messages'));
+    const firstSend = page.evaluate(async () => { document.querySelector('#input').value = 'first synthetic turn'; await send(); });
+    try {
+      await firstSave;
+      await page.evaluate(async () => { document.querySelector('#input').value = 'second synthetic turn'; await send(); });
+      assert.equal(requests.length, 1, 'A new request must wait for the previous reply to be saved.');
+    } finally {
+      allowSave();
+      await firstSend;
+    }
+    assert.ok((await page.locator('#messages').innerText()).includes('synthetic streamed reply'));
+    assert.equal(await page.evaluate(() => currentHistory().at(-1).content), 'synthetic streamed reply');
+    reply = 'data: {"token":"second synthetic reply"}\n\ndata: {"done":true}\n\n';
+    await page.evaluate(async () => { document.querySelector('#input').value = 'second synthetic turn'; await send(); });
+    const messages = await page.locator('#messages').innerText();
+    assert.ok(messages.includes('synthetic streamed reply'));
+    assert.ok(messages.includes('second synthetic reply'));
+    assert.equal(requests[1].messages.at(-2).content, 'synthetic streamed reply');
+    const previousAssistants = await page.evaluate(() => currentHistory().filter(message => message.role === 'assistant').length);
+    reply = 'data: {"error":"Provider request failed. Check configuration and connectivity."}\n\n';
+    await page.evaluate(async () => { document.querySelector('#input').value = 'failed synthetic turn'; await send(); });
+    assert.ok((await page.locator('#messages').innerText()).includes('Provider request failed'));
+    assert.equal(await page.evaluate(() => currentHistory().filter(message => message.role === 'assistant').length), previousAssistants);
+    const savedAfterFailure = await page.evaluate(async () => (await fetch(`/api/sessions/${encodeURIComponent(state.activeSession)}`)).json());
+    assert.equal(savedAfterFailure.messages.filter(message => message.role === 'assistant').length, previousAssistants);
+    reply = 'data: {"token":"synthetic unfinished answer"}\n\n';
+    await page.evaluate(async () => { document.querySelector('#input').value = 'interrupted synthetic turn'; await send(); });
+    assert.ok((await page.locator('#messages').innerText()).includes('响应中断'));
+    assert.equal(await page.evaluate(() => currentHistory().filter(message => message.role === 'assistant').length), previousAssistants);
     assert.deepEqual(errors, []);
     assert.deepEqual(external, []);
     fs.mkdirSync(path.join(root, 'reports'), { recursive: true });
     await page.screenshot({ path: path.join(root, 'reports', 'echo-browser-check.png') });
-    console.log('Browser checks passed: local assets, safe Markdown, session persistence after reload, legacy sessions, no page errors or external asset requests.');
+    console.log('Browser checks passed: local assets, session reload, mocked streamed replies across turns, failed replies excluded from saved history, no external requests.');
   } finally {
     if (browser) await browser.close();
     server.kill();

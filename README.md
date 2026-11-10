@@ -57,6 +57,14 @@ features send audio/text to the configured endpoint. Scheduled tasks can also
 contact that provider when enabled; leave tasks disabled unless intended.
 Bundled browser assets load locally without a CDN.
 
+Provider HTTP failures, connection failures and explicit error payloads now raise
+a sanitized `ProviderError`. The CLI returns exit code 1 with a concise message;
+the Web interface shows a failure without saving an empty or failed assistant
+reply into conversation history. Successful streamed replies are displayed and
+saved only after the server confirms completion. The next turn starts after the
+current conversation save finishes. Direct library callers can catch
+`ProviderError` for provider failures.
+
 ## Verification / 验证
 
 ```sh

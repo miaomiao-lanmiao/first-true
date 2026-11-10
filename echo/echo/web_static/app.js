@@ -224,11 +224,13 @@ async function send() {
   const input = $("#input");
   const text = input.value.trim();
   if (!text || state.stream) return;
+  assistantEl = null;
   input.value = ""; autoResize();
   stopSpeak();
 
   if (!state.activeSession) await newSession();
 
+  const sessionId = state.activeSession;
   const hist = currentHistory();
   hist.push({ role: "user", content: text });
   addMessage("user", esc(text).replace(/\n/g, "<br>"));
@@ -242,11 +244,12 @@ async function send() {
   state.stream = ctrl;
   document.body.classList.add("ai-active");
   let acc = "";
+  let completed = false;
   try {
     const res = await fetch(API + "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: state.activeSession, messages: hist, model: $("#modelSelect").value }),
+      body: JSON.stringify({ session_id: sessionId, messages: hist, model: $("#modelSelect").value }),
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -263,11 +266,13 @@ async function send() {
         if (!line.startsWith("data:")) continue;
         const data = line.slice(5).trim();
         if (!data) continue;
-        try {
-          const j = JSON.parse(data);
-          if (j.error) { acc += `\n\n⚠ ${j.error}`; }
-          else acc += j.delta || "";
-        } catch {}
+        let j;
+        try { j = JSON.parse(data); } catch { continue; }
+        if (!j || typeof j !== "object") continue;
+        if (j.error) throw new Error(j.error);
+        if (j.done === true) completed = true;
+        const token = j.token ?? j.delta;
+        if (typeof token === "string") acc += token;
         hideTyping();
         const target = ensureAssistant();
         target.innerHTML = renderMarkdown(acc);
@@ -276,18 +281,24 @@ async function send() {
         scrollChat();
       }
     }
+    if (!completed) throw new Error("响应中断，请重试。");
   } catch (e) {
+    completed = false;
     if (e.name !== "AbortError") {
       ensureAssistant().innerHTML = `<span style="color:var(--danger)">请求出错：${esc(e.message)}</span>`;
     }
   } finally {
-    state.stream = null;
     btn.classList.remove("stop"); btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
     hideTyping();
-    setStatus("就绪");
-    if (assistantEl) addSpeakBtn(assistantEl);
-    await persistMessages(hist.concat({ role: "assistant", content: acc }));
-    if (voiceState.enabled && acc && !acc.startsWith("⚠")) speak(acc);
+    if (completed && acc && assistantEl) addSpeakBtn(assistantEl);
+    setStatus("保存中…");
+    try {
+      await persistMessages(completed && acc ? hist.concat({ role: "assistant", content: acc }) : hist, sessionId);
+    } finally {
+      state.stream = null;
+      setStatus("就绪");
+    }
+    if (voiceState.enabled && completed && acc) speak(acc);
     else document.body.classList.remove("ai-active");
   }
 }
@@ -304,13 +315,13 @@ function currentHistory() {
   return s && s.messages ? s.messages.map((m) => ({ role: m.role, content: m.content })) : [];
 }
 
-async function persistMessages(messages) {
-  await fetchJSON(`/api/sessions/${state.activeSession}/messages`, {
+async function persistMessages(messages, sessionId = state.activeSession) {
+  await fetchJSON(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages }),
   });
-  const s = state.sessions.find((x) => x.id === state.activeSession);
+  const s = state.sessions.find((x) => x.id === sessionId);
   if (s) s.messages = messages;
 }
 

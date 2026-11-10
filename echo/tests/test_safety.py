@@ -164,6 +164,47 @@ class StorageTests(unittest.TestCase):
         self.assertIn("error", response.text)
         self.assertNotIn("synthetic-private-token", response.text)
 
+    def test_upstream_http_failure_emits_error_without_success_event(self):
+        import httpx
+        from echo.ai import provider
+        from echo.ai.prompts import ProviderConfig
+        real_client = httpx.AsyncClient
+        def handler(request):
+            return httpx.Response(401, json={"error": "synthetic-upstream-secret"}, request=request)
+        selected = ProviderConfig(name="gemini", api_key="synthetic-query-key",
+                                  base_url="https://provider.example.invalid", model="synthetic-model")
+        with patch.object(web, "get_provider_config", return_value=selected), patch.object(
+            provider.httpx, "AsyncClient", side_effect=lambda **kwargs: real_client(
+                transport=httpx.MockTransport(handler), **kwargs,
+            ),
+        ):
+            response = self.client.post("/api/chat", json={"messages": [{"role": "user", "content": "test"}]})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"error"', response.text)
+        self.assertNotIn('"done"', response.text)
+        self.assertNotIn("synthetic-upstream-secret", response.text)
+        self.assertNotIn("synthetic-query-key", response.text)
+
+    def test_cli_provider_error_is_concise_and_returns_failure(self):
+        import httpx
+        from echo.ai import provider
+        from echo.cli import app
+        from typer.testing import CliRunner
+        real_client = httpx.AsyncClient
+        config.save_config({"ai": {"provider": "gemini", "api_key": "synthetic-cli-key",
+                                   "base_url": "https://provider.example.invalid", "model": "synthetic-model"}})
+        def handler(request):
+            return httpx.Response(429, json={"error": "synthetic-response-key"}, request=request)
+        with patch.object(provider.httpx, "AsyncClient", side_effect=lambda **kwargs: real_client(
+            transport=httpx.MockTransport(handler), **kwargs,
+        )):
+            result = CliRunner().invoke(app, ["chat", "synthetic request"])
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("HTTP 429", result.output)
+        self.assertNotIn("synthetic-cli-key", result.output)
+        self.assertNotIn("synthetic-response-key", result.output)
+        self.assertNotIn("Traceback", result.output)
+
     def test_switching_provider_uses_its_default_endpoint_and_model(self):
         current = config.load_config()
         current["ai"]["provider"] = "ollama"
